@@ -397,18 +397,24 @@ class TransmissionData:
 
     def check_completed_torrent(self):
         """Get completed torrent functionality."""
-        current_completed_torrents = [
-            torrent for torrent in self._torrents if torrent.status == "seeding"
-        ]
-        freshly_completed_torrents = set(current_completed_torrents).difference(
-            self._completed_torrents
-        )
-        self._completed_torrents = current_completed_torrents
+        old_completed_torrent_names = {
+            torrent.name for torrent in self._completed_torrents
+        }
 
-        for torrent in freshly_completed_torrents:
-            self.hass.bus.fire(
-                EVENT_DOWNLOADED_TORRENT, {"name": torrent.name, "id": torrent.id}
-            )
+        current_completed_torrents = []
+        current_completed_torrent_names = set()
+        for torrent in self._torrents:
+            if torrent.status == "seeding":
+                current_completed_torrents.append(torrent)
+                current_completed_torrent_names.add(torrent.name)
+
+        for torrent in current_completed_torrents:
+            if torrent.name not in old_completed_torrent_names:
+                self.hass.bus.fire(
+                    EVENT_DOWNLOADED_TORRENT, {"name": torrent.name, "id": torrent.id}
+                )
+
+        self._completed_torrents = current_completed_torrents
 
     def check_started_torrent(self):
         """Get started torrent functionality."""
