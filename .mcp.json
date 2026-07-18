@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "camas": {
+      "type": "stdio",
+      "command": "sh",
+      "args": ["script/run-in-env.sh", "camas", "mcp"]
+    }
+  }
+}

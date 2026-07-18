@@ -1,0 +1,30 @@
+{
+  "hooks": {
+    "PostToolBatch": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh script/run-in-env.sh camas mcp fix"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh script/run-in-env.sh camas mcp fix"
+          },
+          {
+            "type": "command",
+            "command": "sh script/run-in-env.sh camas mcp gate --under 5s --nudge",
+            "async": true,
+            "asyncRewake": true
+          }
+        ]
+      }
+    ]
+  }
+}
