@@ -378,8 +378,8 @@ jobs:
         run: |
           ./script/check_dirty
 
-  hassfest:
-    name: Check hassfest
+  validate:
+    name: Validate (hassfest, requirements, copilot)
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -410,67 +410,10 @@ jobs:
           python-cache-key: ${{ needs.info.outputs.python_cache_key }}
           uv-cache-dir: ${{ env.UV_CACHE_DIR }}
           apt-cache-version: ${{ env.APT_CACHE_VERSION }}
-      - name: Run hassfest
+      - name: Run hassfest, gen_requirements_all, gen_copilot_instructions
         run: |
           . venv/bin/activate
-          python -m script.hassfest --requirements --action validate
-
-  gen-requirements-all:
-    name: Check all requirements
-    runs-on: ubuntu-24.04
-    permissions:
-      contents: read
-    needs:
-      - info
-      - base
-    if: |
-      github.event.inputs.pylint-only != 'true'
-      && github.event.inputs.mypy-only != 'true'
-      && github.event.inputs.audit-licenses-only != 'true'
-    steps:
-      - name: Check out code from GitHub
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        with:
-          persist-credentials: false
-      - name: Set up Python and restore venv
-        id: python
-        uses: ./.github/actions/restore-or-build-venv
-        with:
-          uv-version: ${{ needs.info.outputs.uv_version }}
-          python-version: ${{ needs.info.outputs.default_python }}
-          python-cache-key: ${{ needs.info.outputs.python_cache_key }}
-          uv-cache-dir: ${{ env.UV_CACHE_DIR }}
-          apt-cache-version: ${{ env.APT_CACHE_VERSION }}
-      - name: Run gen_requirements_all.py
-        run: |
-          . venv/bin/activate
-          python -m script.gen_requirements_all validate
-
-  gen-copilot-instructions:
-    name: Check copilot instructions
-    runs-on: ubuntu-24.04
-    permissions:
-      contents: read
-    needs:
-      - info
-    if: |
-      github.event.inputs.pylint-only != 'true'
-      && github.event.inputs.mypy-only != 'true'
-      && github.event.inputs.audit-licenses-only != 'true'
-    steps:
-      - name: Check out code from GitHub
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        with:
-          persist-credentials: false
-      - name: Set up Python
-        id: python
-        uses: ./.github/actions/setup-uv-python
-        with:
-          uv-version: ${{ needs.info.outputs.uv_version }}
-          python-version: ${{ needs.info.outputs.default_python }}
-      - name: Run gen_copilot_instructions.py
-        run: |
-          uv run --no-project python -m script.gen_copilot_instructions validate
+          camas validate
 
   dependency-review:
     name: Dependency review
@@ -579,7 +522,7 @@ jobs:
         run: |
           . venv/bin/activate
           python --version
-          pylint --ignore-missing-annotations=y homeassistant
+          camas pylint
       - name: Run pylint (partially)
         if: needs.info.outputs.test_full_suite == 'false'
         shell: bash
@@ -626,7 +569,7 @@ jobs:
         run: |
           . venv/bin/activate
           python --version
-          pylint tests
+          camas pylint_tests
       - name: Run pylint (partially)
         if: needs.info.outputs.test_full_suite == 'false'
         shell: bash
@@ -688,7 +631,7 @@ jobs:
         run: |
           . venv/bin/activate
           python --version
-          mypy --num-workers=4 homeassistant pylint
+          camas mypy
       - name: Run mypy (partially)
         if: needs.info.outputs.test_full_suite == 'false'
         shell: bash
@@ -755,8 +698,7 @@ jobs:
     needs:
       - info
       - base
-      - gen-requirements-all
-      - hassfest
+      - validate
       - prek
       - mypy
       - prepare-pytest-full
@@ -891,8 +833,7 @@ jobs:
     needs:
       - info
       - base
-      - gen-requirements-all
-      - hassfest
+      - validate
       - prek
       - mypy
     if: |
@@ -1034,8 +975,7 @@ jobs:
     needs:
       - info
       - base
-      - gen-requirements-all
-      - hassfest
+      - validate
       - prek
       - mypy
     if: |
@@ -1203,8 +1143,7 @@ jobs:
     needs:
       - info
       - base
-      - gen-requirements-all
-      - hassfest
+      - validate
       - prek
       - mypy
     if: |

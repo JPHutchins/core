@@ -16,7 +16,7 @@
     {
       "label": "Pytest",
       "type": "shell",
-      "command": "${command:python.interpreterPath} -m pytest --timeout=10 tests",
+      "command": "sh script/run-in-env.sh camas test",
       "dependsOn": ["Install all Test Requirements"],
       "group": {
         "kind": "test",
@@ -45,7 +45,7 @@
     {
       "label": "Ruff",
       "type": "shell",
-      "command": "prek run ruff-check --all-files",
+      "command": "sh script/run-in-env.sh camas fix",
       "group": {
         "kind": "test",
         "isDefault": true
@@ -73,7 +73,7 @@
     {
       "label": "Pylint",
       "type": "shell",
-      "command": "pylint homeassistant",
+      "command": "sh script/run-in-env.sh camas pylint",
       "dependsOn": ["Install all Requirements"],
       "group": {
         "kind": "test",
@@ -163,7 +163,7 @@
       "label": "Compile English translations",
       "detail": "In order to test changes to translation files, the translation strings must be compiled into Home Assistant's translation directories.",
       "type": "shell",
-      "command": "${command:python.interpreterPath} -m script.translations develop --all",
+      "command": "sh script/run-in-env.sh camas compile_translations",
       "group": {
         "kind": "build",
         "isDefault": true
