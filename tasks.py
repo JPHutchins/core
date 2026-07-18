@@ -89,10 +89,18 @@ pylint = Task(
     "pylint --ignore-missing-annotations=y {paths}",
     paths=under(("homeassistant/", "pylint/"), (".py", ".pyi"), ("homeassistant",)),
 )
+pylint_tests = Task(
+    "pylint {paths}", paths=under(("tests/",), (".py", ".pyi"), ("tests",))
+)
 hassfest = Task(
     "python3 -m script.hassfest --requirements --action validate",
     when=("homeassistant", "requirements"),
 )
+gen_requirements = Task(
+    "python3 -m script.gen_requirements_all validate",
+    when=("homeassistant", "requirements"),
+)
+gen_copilot = Task("python3 -m script.gen_copilot_instructions validate")
 codespell = Task(
     "codespell {paths} "
     "--ignore-words-list=aiport,astroid,checkin,currenty,hass,iif,incomfort,lookin,nam,NotIn "
@@ -110,8 +118,10 @@ test = Sequential(
 py_versions = tuple((Path(__file__).parent / ".python-version").read_text().split())
 test_matrix = Parallel(Task("pytest tests --timeout=10"), matrix={"PY": py_versions})
 
-lint = Parallel(ruff_lint, ruff_format_check, mypy, pylint, codespell)
-check = Parallel(lint, hassfest, test)
+lint = Parallel(ruff_lint, ruff_format_check, mypy, pylint, pylint_tests, codespell)
+validate = Parallel(hassfest, gen_requirements, gen_copilot)
+ci_checks = Parallel(lint, validate)
+check = Parallel(ci_checks, test)
 dev = Sequential(fix, check)
 
 _ = Config(
