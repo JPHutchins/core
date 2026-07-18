@@ -23,18 +23,33 @@ camas replaces; the **functional** scripts (`hassfest`, `gen_requirements_all`,
 ## Current state
 
 - `camas[mcp]==0.1.26` in `requirements_test.txt`.
-- `.venv` = `uv pip install -e . -r requirements_test.txt colorlog` (skips
-  `requirements_all.txt`; see Env note 1).
-- Single-file `tasks.py` (12 tasks), no `Project`, no `name=`, bound nodes:
-  `fix` (ruff --fix → format, `mutates`) · `check` = `Parallel(ruff_lint,
-  ruff_format_check, mypy, pylint, hassfest, codespell, test)` · `dev =
-  Sequential(fix, check)`. `Config(default_task=dev, github_task=check,
-  agent=Claude(fix=fix, check=check))`. `default=dev`, `github_default=check`,
-  `run_default=check` all resolve.
+- `.venv` = **real, full-deps** — `uv pip install -e . -r requirements_all.txt -r
+  requirements_test.txt` (1667 pkgs; `dtlssocket` built via `autoconf`/`automake`/`libtool`;
+  `hassil`/`paho.mqtt`/`pyoverkiz`/`pytradfri`/`google.cloud.texttospeech` all import).
+- Single-file `tasks.py` (15 tasks), no `Project`, no `name=`, bound nodes:
+  `fix` (ruff --fix → format, `mutates`) · `lint` = `Parallel(ruff_lint,
+  ruff_format_check, mypy, pylint, codespell)` · `check` = `Parallel(lint, hassfest, test)`
+  · `dev = Sequential(fix, check)` · `gate` = `Parallel(ruff_lint, ruff_format_check)`.
+  `Config(default_task=dev, github_task=check, agent=Claude(fix=fix, check=gate))`.
+  Heavy leaves carry `{paths}`/`when=` scopes mirroring the pre-commit `files:` filters.
+  `test = Sequential(compile_translations, pytest)` and the pytest leaf's `to_tests`
+  scope maps changed source → its test file (subsumes `script/lint_and_test.py`).
+- **Fidelity fixes to reproduce CI exactly:** `pylint --ignore-missing-annotations=y`
+  (CI's flag — without it HA's `hass_enforce_type_hints` plugin flags ~hundreds of
+  missing-annotation E7402/E7403 that CI suppresses); `hassfest --requirements
+  --action validate` (CI's non-mutating validate mode); `compile_translations`
+  (`script.translations develop --all`) sequenced before pytest (CI runs it before every
+  test job — else tests assert on untranslated keys). mypy reads the generated `mypy.ini`.
+- `agent=Claude(fix=fix, check=lint)`: the per-edit gate runs the full lint **scoped** to
+  changed files (mypy 0.95s / pylint 2.06s on one file — measured). The earlier ruff-only
+  workaround is gone (it existed only because mypy/pylint *failed* on the partial env).
 - `.mcp.json` + `.claude/settings.json` hooks launch camas via `sh
-  script/run-in-env.sh camas …` (activates `.venv`; Finding 2). `.camas/` gitignored.
-- **Next:** GH Actions SSOT (`--github-matrix`, axis from `.python-version`),
-  assessment of HA-scripting removal, and a lint-parallelism benchmark.
+  script/run-in-env.sh camas …` (activates `.venv`; Finding 2). `.camas/` self-ignored.
+- **CI reproduced green (real deps, full runs via `camas <leaf>`):** `ruff_lint`/`ruff_format_check`
+  (<0.05s), `mypy homeassistant pylint` (62s, fresh cache), `pylint --ignore-missing-annotations=y
+  homeassistant` (410s), `hassfest` (21s), `codespell` (2.6s), and the `test` harness
+  (`compile_translations` → `pytest tests/test_core.py`, green). The full `pytest tests` suite
+  is CI-sharded (`split_tests.py`) and not run whole locally — harness fidelity verified on a slice.
 
 ## Findings ledger (fileable upstream)
 
@@ -149,6 +164,27 @@ trailing `|| true`, or camas exiting 0 when it can't run), and prefer a
 cwd-independent launcher (`$CLAUDE_PROJECT_DIR`-anchored) so a changed cwd can't
 break it.
 
+### 10. `--under` gate budget is not scope-aware — excludes fast-scoped leaves by a full-tree estimate — `open` (headline, new)
+**feature gap (hard evidence).** The `--under` budget on a *scoped* gate compares each
+leaf against its **recorded (largely full-tree) timing**, not the cost of the scoped run
+it is about to do. Measured here on one changed file
+(`homeassistant/components/hue/light.py`): scoped `mypy` = **0.95s**, scoped `pylint` =
+**2.06s** (both green). Yet `camas_gate(paths=[that file], under=5)` **excluded** both —
+`mypy` (`estimated_s` 22.7, over budget) and `pylint` (`estimated_s` 206, over budget) —
+because those estimates are dominated by the whole-tree `camas check` runs. So a time-boxed
+scoped gate systematically drops exactly the heavy-but-scopable checks (`mypy`/`pylint`) on
+the small changes where they would be fast, leaving only ruff/codespell. Worse, it is a
+**poisoning** effect: running the full task *once* (to reproduce CI, or a single cold gate)
+records the big estimate and suppresses those leaves from every subsequent scoped gate until
+enough scoped samples dilute the average. Without `--under` the same gate runs the full
+scoped lint in ~2s and returns green — so the budget mechanism is actively removing signal.
+**Workaround here:** drop `--under` from the Stop hook (`camas mcp gate --nudge`); the gate
+is already `async`, so a rare large change costs latency, not a block.
+**Ask:** make the budget scope-aware — record timings per scope-size (or estimate scoped
+cost ∝ file count), or measure the scoped leaf's *first* run before excluding it, rather
+than pre-excluding on a whole-tree estimate. (Distinct from #218, which is about a *failing*
+leaf never being timed; this is about a *passing* leaf mis-estimated for the scoped case.)
+
 ## Not camas bugs (author error / environment — recorded for honesty, not filed)
 
 - **`name=` and my "github_default is broken" confusion.** I repeatedly stamped
@@ -202,6 +238,40 @@ From the full orchestration map. camas replaces the **glue**, not the tools/scri
   `script/check_format`, `script/server`; and the `.vscode/tasks.json` labels +
   `dependsOn` chains. The `.pre-commit-config.yaml` orchestration also folds in (though
   `prek` is still wanted as the git-hook driver).
+- **Repeated inline CI steps collapse to one node.** `python3 -m script.translations
+  develop --all` is copy-pasted verbatim before *every* pytest step in ci.yaml (4 jobs:
+  L806, L942, L1092, L1250). In camas it's a single `mutates=True` leaf sequenced ahead
+  of pytest (`test = Sequential(compile_translations, pytest)`) — declared once, run
+  wherever `test` runs. Same story for the `--ignore-missing-annotations=y` pylint flag
+  and the `hassfest --requirements --action validate` args, which live in *both* ci.yaml
+  and (differently) `.pre-commit-config.yaml` today.
+
+### Worked example: `script/lint_and_test.py` (179 lines) → declarative camas nodes
+
+`script/lint_and_test.py` is HA's hand-rolled "quick check during development": it
+`git merge-base upstream/dev`-diffs the changed files, runs **pylint ‖ ruff in parallel**
+(`asyncio.gather`), **maps each changed source file to its `tests/…/test_<name>.py`**,
+runs pytest on them, and conditionally validates requirements when a component changed —
+all via bespoke `asyncio.create_subprocess_exec`, hand-written output parsing, and a
+custom color printer. Every one of those is a camas primitive:
+
+| `lint_and_test.py` does (imperatively) | camas expresses (declaratively) |
+|---|---|
+| `git merge-base` diff → changed `.py` | built-in changed-set + `{paths}` scoping |
+| `asyncio.gather(pylint, ruff)` | `Parallel(pylint, ruff_lint)` (wall-clock max) |
+| map `homeassistant/…/X.py` → `tests/…/test_X.py` | the `to_tests` `PathScope` (a `(changed)->paths` callable *derives*, not just filters) |
+| run mapped tests | `test = Task("pytest {paths}", paths=to_tests)` |
+| validate requirements iff a component changed | `hassfest`'s `when=("homeassistant","requirements")` |
+| color output / error parsing | camas effects (`Termtree`/`Status`) |
+
+Verified against the real tree (CLI `--paths`, since `camas_run` has no `paths` — Finding 4):
+`camas test --paths homeassistant/core.py` → `pytest tests/test_core.py`;
+`--paths homeassistant/components/sensor/recorder.py` →
+`pytest tests/components/sensor/test_recorder.py`; a mixed changed set
+(`core.py`, `sensor/recorder.py`, `tests/test_config.py`) dedups and maps to
+`pytest tests/components/sensor/test_recorder.py tests/test_config.py tests/test_core.py`
+— exactly `lint_and_test.py`'s selection, now sharing one definition with the CI `test`
+job and the agent gate. **This is the concrete "we don't need this script anymore" case.**
 - **STAYS as functional leaves camas CALLS:** `script/hassfest`, `gen_requirements_all`,
   `gen_copilot_instructions`, `licenses`, `translations`, `check_requirements`,
   `scaffold`, `split_tests.py` (the packing algorithm), `check_dirty`, and the tools
@@ -217,26 +287,33 @@ From the full orchestration map. camas replaces the **glue**, not the tools/scri
   HA's per-hook parallelism (today only `script/lint_and_test.py`'s `asyncio.gather(pylint, ruff)`)
   comes from the same source as the CI fan-out.
 
-## Finish line (next session)
+## Finish line — DONE
 
-The `.venv` was intentionally partial (skipped `requirements_all.txt`), so `mypy`/`hassfest`/
-`test` fail on missing imports (`hassil`, `paho`, integration libs) and pre-existing strictness.
-That is an environment artifact, not the migration — the goal is a **real full-deps env** where
-`camas check` reproduces HA CI green.
+Real full-deps env (`uv pip install -e . -r requirements_all.txt -r requirements_test.txt`,
+1667 pkgs), and every CI-reproducing leaf verified green via the camas SSOT path
+(`sh script/run-in-env.sh camas <leaf>`, which on a clean tree does a full run):
 
-1. **Full deps — DONE.** `autoconf`/`automake`/`libtool` installed (June); the full
-   `uv pip install -e . -r requirements_all.txt -r requirements_test.txt` reconciled the env
-   (1667 pkgs, `dtlssocket` built; `hassil`/`paho.mqtt`/`pyoverkiz`/`pytradfri` all import OK).
-   The env is real now — no more partial-venv artifacts. (`hassfest -p metadata` already green.)
-2. **Verify CI reproduction.** With real deps, `mypy homeassistant pylint` (reads `mypy.ini`),
-   `pylint homeassistant`, `hassfest`, and `pytest tests` should go green like HA CI — run
-   `camas check` (the `github_task`) and confirm. The 1294 mypy errors were the missing-deps
-   artifact; with deps + `mypy.ini` they should clear.
-3. **Restore the gate.** The gate was narrowed to `ruff`-only because `mypy`/`pylint` failed on
-   the partial env (and #218: a failing leaf can't be `--under`-excluded). With green lint,
-   either fold `mypy`/`pylint` back into `agent.check`, or keep the gate lean (ruff) with a green
-   full `check` in CI — decide per how fast lint runs.
-4. **PR.** Optionally open the PR on `JPHutchins/core@migrate-to-camas`.
+| Leaf | camas command (full run) | result |
+|---|---|---|
+| ruff | `ruff check` / `ruff format --check` | ✓ <0.05s |
+| mypy | `mypy homeassistant pylint` (reads `mypy.ini`) | ✓ 62s (fresh cache) |
+| pylint | `pylint --ignore-missing-annotations=y homeassistant` | ✓ 410s |
+| hassfest | `python3 -m script.hassfest --requirements --action validate` | ✓ 21s |
+| codespell | HA ignore-words + generated/fixtures/snapshots skips | ✓ 2.6s |
+| test | `compile_translations` → `pytest …` | ✓ harness green on a slice |
+
+Notes that mattered:
+- The first `mypy` run showed 4 errors — all **stale `.mypy_cache`** from the partial-deps
+  era (`google.cloud.texttospeech` "has no attribute" + cascading unused-ignores). `rm -rf
+  .mypy_cache` and re-run → clean. The old **1294** mypy errors were the same artifact at scale.
+- The gate is restored to the **full scoped lint** (`agent.check = lint`); the ruff-only
+  workaround is deleted. Scoped mypy/pylint are ~1–2s per file. The Stop hook dropped
+  `--under` (Finding 10) so those heavy-but-fast-when-scoped leaves are not mis-excluded.
+- The full `pytest tests` suite is **not** run whole locally — it is CI-sharded by
+  `split_tests.py` across 10×N jobs (camas owns the group axis, not the balancing). Harness
+  fidelity (translations prereq + pytest wiring + `to_tests` mapping) is verified on a slice.
+
+**Remaining (optional):** open the PR on `JPHutchins/core@migrate-to-camas`.
 
 ## Overall assessment: is camas a win for a project the size of HA?
 
