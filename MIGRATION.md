@@ -87,7 +87,9 @@ optimization stays raw. camas also keeps `prek` for ruff/codespell + the externa
 (venv launcher / child PATH + requirements.txt onboarding), #218 (gate `--under` can't
 budget a persistently-failing leaf), #219 (`camas_run` no `paths`), #220 (prefix+suffix
 `PathScope` matcher), #221 (fix hook should no-op), **#224** (gate `--under` budgets
-against whole-tree estimates, mis-excludes fast-when-scoped leaves — Finding 10).
+against whole-tree estimates, mis-excludes fast-when-scoped leaves — Finding 10),
+**#225** (`camas_run(dry_run=True)` previews all leaves `skipped` while a real run executes
+them — Finding 11; the MCP dry-run also disagrees with the CLI `--dry-run`, which is correct).
 Cross-project comment added to existing #214 (redundant `name=`). Findings 0/3/5/6
 withdrawn (documented behavior / camas self-handles / author error) — deliberately *not* filed.
 
@@ -215,6 +217,18 @@ is already `async`, so a rare large change costs latency, not a block.
 cost ∝ file count), or measure the scoped leaf's *first* run before excluding it, rather
 than pre-excluding on a whole-tree estimate. (Distinct from #218, which is about a *failing*
 leaf never being timed; this is about a *passing* leaf mis-estimated for the scoped case.)
+
+### 11. `camas_run(dry_run=True)` previews leaves as `skipped` that a real run executes — `filed #225`
+**MCP correctness (hard evidence).** On a clean tree, `camas_run(task="validate", dry_run=True)`
+reported all 3 leaves `skipped`; a real `camas_run(task="validate")` seconds later executed all 3
+(hassfest ran its full 70s). Even the unscoped `gen_copilot` (no `{paths}`/`when=`, so it can never
+be scoped out) previews as `skipped`. The dry-run and real paths compute a *different* changed-set
+for the same tree (dry → `scope_to_changed` → everything drops; real → `with_default_paths` → full).
+The MCP dry-run also disagrees with the CLI `camas <task> --dry-run`, which correctly prints the full
+resolved tree. Impact: `dry_run` (documented as "preview the fully-resolved plan") previews the
+opposite of the real run, and all-`skipped` + `returncode 0` reads as a false green. **This also
+corrects an earlier session belief** — "MCP scopes to the branch diff / skips on a clean tree" was
+this dry-run artifact, not real `camas_run` behavior (real `camas_run` does a full run on a clean tree).
 
 ## Not camas bugs (author error / environment — recorded for honesty, not filed)
 
