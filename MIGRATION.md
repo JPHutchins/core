@@ -210,9 +210,33 @@ From the full orchestration map. camas replaces the **glue**, not the tools/scri
   restore, artifact up/download, Codecov uploads, `dependency-review`, DB service
   containers, the strategy-matrix expansion itself, and all repo-automation workflows
   (`builder`, `wheels`, `codeql`, `stale`, `lock`, issue bots, translations upload, e2e).
-- **The parallelism win is single-machine.** HA's CI already parallelizes lint across N
-  GH jobs/runners; camas's win is doing that on ONE runner (1/N the minutes) or locally
-  where today only `script/lint_and_test.py`'s `asyncio.gather(pylint, ruff)` parallelizes.
+- **One definition, context-appropriate dispatch.** The tree and its matrix are declared once;
+  camas dispatches the *same* definition across **GH runners** in CI (`--github-matrix` →
+  `strategy.matrix`) and across **local processes/cores** in dev. That SSOT-dispatch — not any
+  "1/N runner-minutes" cost angle — is the win: a developer runs the exact matrix CI runs, and
+  HA's per-hook parallelism (today only `script/lint_and_test.py`'s `asyncio.gather(pylint, ruff)`)
+  comes from the same source as the CI fan-out.
+
+## Finish line (next session)
+
+The `.venv` was intentionally partial (skipped `requirements_all.txt`), so `mypy`/`hassfest`/
+`test` fail on missing imports (`hassil`, `paho`, integration libs) and pre-existing strictness.
+That is an environment artifact, not the migration — the goal is a **real full-deps env** where
+`camas check` reproduces HA CI green.
+
+1. **Full deps — DONE.** `autoconf`/`automake`/`libtool` installed (June); the full
+   `uv pip install -e . -r requirements_all.txt -r requirements_test.txt` reconciled the env
+   (1667 pkgs, `dtlssocket` built; `hassil`/`paho.mqtt`/`pyoverkiz`/`pytradfri` all import OK).
+   The env is real now — no more partial-venv artifacts. (`hassfest -p metadata` already green.)
+2. **Verify CI reproduction.** With real deps, `mypy homeassistant pylint` (reads `mypy.ini`),
+   `pylint homeassistant`, `hassfest`, and `pytest tests` should go green like HA CI — run
+   `camas check` (the `github_task`) and confirm. The 1294 mypy errors were the missing-deps
+   artifact; with deps + `mypy.ini` they should clear.
+3. **Restore the gate.** The gate was narrowed to `ruff`-only because `mypy`/`pylint` failed on
+   the partial env (and #218: a failing leaf can't be `--under`-excluded). With green lint,
+   either fold `mypy`/`pylint` back into `agent.check`, or keep the gate lean (ruff) with a green
+   full `check` in CI — decide per how fast lint runs.
+4. **PR.** Optionally open the PR on `JPHutchins/core@migrate-to-camas`.
 
 ## Overall assessment: is camas a win for a project the size of HA?
 
@@ -227,13 +251,17 @@ From the full orchestration map. camas replaces the **glue**, not the tools/scri
    drive-by + increasingly LLM-assisted contributions. A deterministic `FileChanged → fix`
    plus a scoped tripwire that mirrors CI (`{paths}`/`when=` = the pre-commit `files:` filters)
    keeps a contributor's change green in their own context, off the maintainer's plate.
-3. **Version-matrix SSOT.** `.python-version` → `--github-matrix` → GHA `strategy.matrix`,
-   verified — the version list lives once, not re-encoded in YAML.
+3. **Matrix SSOT with context-appropriate dispatch (the core value).** The matrix — e.g. the
+   Python-version axis sourced from `.python-version` — is defined **once** in `tasks.py`.
+   `camas <task> --github-matrix` emits it so GitHub fans out across N runners; `camas <task>`
+   locally fans the *same* matrix across processes/cores. One definition → CI dispatches over
+   runners, dev dispatches over cores, and a developer reproduces the exact CI matrix locally,
+   with zero YAML/local duplication. Verified: `.python-version` → `{"PY": ["3.14.5"]}`.
 4. **Typed, testable task defs.** `tasks.py` is typed Python checked by ty/mypy (`camas_check`)
    — vs YAML/shell that drifts without a checker.
-5. **Single-runner parallelism = CI $$ for private/enterprise forks.** ~10 parallel lint jobs
-   collapse onto one runner at 1/N the paid minutes. (Blunted for HA itself by free OSS runners;
-   a real win for enterprise mirrors.)
+5. **(secondary, downstream of #3)** Because the same tree can run as one camas job on a single
+   runner (parallel across cores) rather than N GH jobs, paid-runner minutes drop — but that's a
+   *consequence* of the SSOT-dispatch in #3, not the point, and it's blunted for HA by free OSS runners.
 
 **Where camas is *not* the win (honest boundaries):**
 
