@@ -291,7 +291,24 @@ job and the agent gate. **This is the concrete "we don't need this script anymor
 ## Finish line — DONE
 
 Real full-deps env (`uv pip install -e . -r requirements_all.txt -r requirements_test.txt`,
-1667 pkgs), and every CI-reproducing leaf verified green via the camas SSOT path
+1667 pkgs). `camas check --dry-run` (the `github_task`, full run) resolves to **exactly** the
+CI commands — one tree, no YAML re-encoding:
+
+```
+check ∥
+┃ lint ∥
+┃ ┃ ruff_lint: ruff check .
+┃ ┃ ruff_format_check: ruff format --check .
+┃ ┃ mypy: mypy homeassistant pylint
+┃ ┃ pylint: pylint --ignore-missing-annotations=y homeassistant
+┃ ┃ codespell: codespell . --ignore-words-list=… --skip=…
+┃ hassfest: python3 -m script.hassfest --requirements --action validate
+┃ test →
+┃ ├─ compile_translations: python3 -m script.translations develop --all
+┃ └─ pytest tests --timeout=10
+```
+
+Every CI-reproducing leaf verified green via the camas SSOT path
 (`sh script/run-in-env.sh camas <leaf>`, which on a clean tree does a full run):
 
 | Leaf | camas command (full run) | result |
@@ -315,6 +332,39 @@ Notes that mattered:
   fidelity (translations prereq + pytest wiring + `to_tests` mapping) is verified on a slice.
 
 **Remaining (optional):** open the PR on `JPHutchins/core@migrate-to-camas`.
+
+## Benchmark: is camas's parallelism the win? (honest answer: no — scoping is)
+
+Full-tree `camas lint` on the real env, one warm run (per-leaf durations from the run record;
+parallel wall-clock from `WALL_END − WALL_START`):
+
+| leaf | duration |
+|---|---|
+| ruff_lint / ruff_format_check | 0.08s / 0.07s |
+| mypy (warm cache) | 5.2s |
+| codespell | 7.4s |
+| **pylint** | **425.2s** |
+| **parallel wall-clock** | **~425.8s** |
+| sequential sum (same run) | ~438.0s |
+
+**Speedup from `Parallel` on the full lint: ~1.03× (~12s, ~3%).** HA's lint is so
+**pylint-dominated** that every other tool completes inside pylint's shadow, and pylint itself
+is one leaf `Parallel` can't split (it already runs `jobs=2` internally). So single-machine
+*tool*-parallelism is nearly moot for HA's whole-tree lint — an honest result, not the
+"camas is N× faster" one might hope for.
+
+The real lever is **scoping**, and it compounds with parallelism per-edit: on one changed
+file the same suite is ruff 0.02s ‖ mypy 0.95s ‖ pylint 2.06s ‖ codespell 0.12s → **~2s**
+wall-clock (measured), because scoped pylint is 2s not 425s. That is the per-edit gate, run on
+every contribution. So for HA the parallelism story is: *marginal* on the full tree, *decisive*
+once scoped — which points the value at the SSOT + scoping + matrix-dispatch, not at raw
+single-machine fan-out.
+
+Where single-machine fan-out *would* pay off is a leaf camas can shard: pylint over file-buckets
+(a `Parallel`/matrix, the way `split_tests.py` shards pytest) would cut the 425s dramatically —
+a natural follow-up, and itself an argument for defining the fan-out in `tasks.py`. A rigorous
+worktree A/B (camas vs `prek run --all-files`, cold vs warm) is the documented next step for a
+fuller number.
 
 ## Overall assessment: is camas a win for a project the size of HA?
 
