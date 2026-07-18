@@ -36,6 +36,41 @@ def under(
     return scope
 
 
+def to_tests(changed: tuple[str, ...]) -> tuple[str, ...]:
+    """Map changed files to the tests that cover them.
+
+    Reproduces `script/lint_and_test.py`'s selection: a changed test module runs
+    directly; a changed source file maps to its sibling `tests/…/test_<name>.py`
+    when that file exists. A full run (no changed set) targets the whole `tests`
+    tree, matching CI's `pytest tests`.
+    """
+    if not changed:
+        return ("tests",)
+    root = Path(__file__).parent
+    tests: set[str] = set()
+    for f in changed:
+        if not f.endswith(".py"):
+            continue
+        if f.startswith("tests/"):
+            if "/test_" in f:
+                tests.add(f)
+            continue
+        parts = f.split("/")
+        parts[0] = "tests"
+        stem = parts[-1]
+        parts[-1] = (
+            "test_init.py"
+            if stem == "__init__.py"
+            else "test_main.py"
+            if stem == "__main__.py"
+            else f"test_{stem}"
+        )
+        candidate = "/".join(parts)
+        if (root / candidate).is_file():
+            tests.add(candidate)
+    return tuple(sorted(tests))
+
+
 py_files = by_suffix((".py", ".pyi"), default=(".",))
 
 ruff_fix = Task("ruff check --fix {paths}", mutates=True, paths=py_files)
@@ -51,10 +86,13 @@ mypy = Task(
     ),
 )
 pylint = Task(
-    "pylint {paths}",
-    paths=under(("homeassistant/",), (".py", ".pyi"), ("homeassistant",)),
+    "pylint --ignore-missing-annotations=y {paths}",
+    paths=under(("homeassistant/", "pylint/"), (".py", ".pyi"), ("homeassistant",)),
 )
-hassfest = Task("python3 -m script.hassfest", when=("homeassistant", "requirements"))
+hassfest = Task(
+    "python3 -m script.hassfest --requirements --action validate",
+    when=("homeassistant", "requirements"),
+)
 codespell = Task(
     "codespell {paths} "
     "--ignore-words-list=aiport,astroid,checkin,currenty,hass,iif,incomfort,lookin,nam,NotIn "
@@ -62,8 +100,11 @@ codespell = Task(
     "--quiet-level=2",
     paths=".",
 )
-test = Task(
-    "pytest {paths} --timeout=10", paths=under(("tests/",), (".py",), ("tests",))
+compile_translations = Task(
+    "python3 -m script.translations develop --all", mutates=True
+)
+test = Sequential(
+    compile_translations, Task("pytest {paths} --timeout=10", paths=to_tests)
 )
 
 py_versions = tuple((Path(__file__).parent / ".python-version").read_text().split())
@@ -71,11 +112,10 @@ test_matrix = Parallel(Task("pytest tests --timeout=10"), matrix={"PY": py_versi
 
 lint = Parallel(ruff_lint, ruff_format_check, mypy, pylint, codespell)
 check = Parallel(lint, hassfest, test)
-gate = Parallel(ruff_lint, ruff_format_check)
 dev = Sequential(fix, check)
 
 _ = Config(
     default_task=dev,
     github_task=check,
-    agent=Claude(fix=fix, check=gate),
+    agent=Claude(fix=fix, check=lint),
 )

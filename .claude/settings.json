@@ -19,7 +19,7 @@
           },
           {
             "type": "command",
-            "command": "sh script/run-in-env.sh camas mcp gate --under 5s --nudge",
+            "command": "sh script/run-in-env.sh camas mcp gate --nudge",
             "async": true,
             "asyncRewake": true
           }
