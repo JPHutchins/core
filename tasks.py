@@ -58,7 +58,8 @@ hassfest = Task("python3 -m script.hassfest", when=("homeassistant", "requiremen
 codespell = Task(
     "codespell {paths} "
     "--ignore-words-list=aiport,astroid,checkin,currenty,hass,iif,incomfort,lookin,nam,NotIn "
-    "--skip=./.*,*.csv,*.json,*.ambr",
+    "--skip=./.*,*.csv,*.json,*.ambr,*.html,*/generated/*,*/fixtures/*,*/snapshots/* "
+    "--quiet-level=2",
     paths=".",
 )
 test = Task(

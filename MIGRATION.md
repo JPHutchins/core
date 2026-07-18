@@ -156,10 +156,14 @@ break it.
 - **Env note 1 — partial venv.** Skipping `requirements_all.txt` (one dep,
   `dtlssocket` via `pytradfri[async]`, needs `autoconf`) leaves integration deps
   uninstalled, so `mypy`/`hassfest` hit `ModuleNotFoundError: hassil`. Not camas.
-- **Env note 2 — tasks.py fidelity.** `codespell` flags `hass`→`hash` because the
-  leaf omits HA's `--ignore-words-list`; `mypy homeassistant pylint` ignores HA's
-  `mypy.ini`/`.strict-typing` scoping. tasks.py must reproduce each tool's real
-  invocation — a migration task, not a camas defect (relates to Finding 7).
+- **Env note 2 — config fidelity IS the SSOT value, not a defect.** Getting the
+  `codespell` leaf right (HA's `--ignore-words-list` + the `generated/`/`fixtures/`/
+  `snapshots/` excludes) took two tries — precisely because HA's codespell config
+  lives only in `.pre-commit-config.yaml` and had to be *re-encoded* here. Under
+  camas-as-SSOT that config is defined once in `tasks.py` and local + CI + gate all
+  run it; the re-encoding pain is the deficiency camas removes, not a camas flaw.
+  (`mypy` would likewise need HA's `mypy.ini`/`.strict-typing` scoping to be faithful
+  — same story; the partial venv also blocks it here regardless.)
 
 ## GH Actions SSOT (assessment)
 
