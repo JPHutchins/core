@@ -56,9 +56,10 @@ camas replaces; the **functional** scripts (`hassfest`, `gen_requirements_all`,
 **Filed upstream (2026-07-17):** #216 (anonymous node → null `github_default`), #217
 (venv launcher / child PATH + requirements.txt onboarding), #218 (gate `--under` can't
 budget a persistently-failing leaf), #219 (`camas_run` no `paths`), #220 (prefix+suffix
-`PathScope` matcher), #221 (fix hook should no-op). Cross-project comment added to
-existing #214 (redundant `name=`). Findings 0/3/5/6 withdrawn (documented behavior /
-camas self-handles / author error) — deliberately *not* filed.
+`PathScope` matcher), #221 (fix hook should no-op), **#224** (gate `--under` budgets
+against whole-tree estimates, mis-excludes fast-when-scoped leaves — Finding 10).
+Cross-project comment added to existing #214 (redundant `name=`). Findings 0/3/5/6
+withdrawn (documented behavior / camas self-handles / author error) — deliberately *not* filed.
 
 Each finding below became a standalone issue at `JPHutchins/camas`. Status:
 `open` / `filed #NNN` / `withdrawn`.
@@ -164,7 +165,7 @@ trailing `|| true`, or camas exiting 0 when it can't run), and prefer a
 cwd-independent launcher (`$CLAUDE_PROJECT_DIR`-anchored) so a changed cwd can't
 break it.
 
-### 10. `--under` gate budget is not scope-aware — excludes fast-scoped leaves by a full-tree estimate — `open` (headline, new)
+### 10. `--under` gate budget is not scope-aware — excludes fast-scoped leaves by a full-tree estimate — `filed #224`
 **feature gap (hard evidence).** The `--under` budget on a *scoped* gate compares each
 leaf against its **recorded (largely full-tree) timing**, not the cost of the scoped run
 it is about to do. Measured here on one changed file
@@ -328,6 +329,10 @@ Notes that mattered:
    drive-by + increasingly LLM-assisted contributions. A deterministic `FileChanged → fix`
    plus a scoped tripwire that mirrors CI (`{paths}`/`when=` = the pre-commit `files:` filters)
    keeps a contributor's change green in their own context, off the maintainer's plate.
+   Measured: the full scoped gate (ruff+mypy+pylint+codespell) on one changed integration
+   file returns green in ~2s (`mypy` 0.95s, `pylint` 2.06s) — the *same* tools CI runs, on
+   just the touched files, per edit. (The heavy-but-fast-when-scoped point cuts both ways —
+   it also surfaced Finding #224.)
 3. **Matrix SSOT with context-appropriate dispatch (the core value).** The matrix — e.g. the
    Python-version axis sourced from `.python-version` — is defined **once** in `tasks.py`.
    `camas <task> --github-matrix` emits it so GitHub fans out across N runners; `camas <task>`
