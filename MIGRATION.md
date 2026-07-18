@@ -38,8 +38,15 @@ camas replaces; the **functional** scripts (`hassfest`, `gen_requirements_all`,
 
 ## Findings ledger (fileable upstream)
 
-Each is written to become a standalone issue at `JPHutchins/camas`. Status:
-`open` (to file) / `filed #NNN`.
+**Filed upstream (2026-07-17):** #216 (anonymous node → null `github_default`), #217
+(venv launcher / child PATH + requirements.txt onboarding), #218 (gate `--under` can't
+budget a persistently-failing leaf), #219 (`camas_run` no `paths`), #220 (prefix+suffix
+`PathScope` matcher), #221 (fix hook should no-op). Cross-project comment added to
+existing #214 (redundant `name=`). Findings 0/3/5/6 withdrawn (documented behavior /
+camas self-handles / author error) — deliberately *not* filed.
+
+Each finding below became a standalone issue at `JPHutchins/camas`. Status:
+`open` / `filed #NNN` / `withdrawn`.
 
 ### 0. (meta) Author-time diagnostics for documented anti-patterns — `open` (modest)
 Honest framing: that I authored several documented anti-patterns despite the
