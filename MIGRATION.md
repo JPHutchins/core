@@ -20,20 +20,50 @@ camas models these as one root `tasks.py`. The **orchestration/glue** is what
 camas replaces; the **functional** scripts (`hassfest`, `gen_requirements_all`,
 `translations`) stay and are invoked as camas leaves.
 
+## Did it simplify the infra? Net **−178 lines of orchestration**
+
+The migration is no longer additive — the subsumed glue is deleted. Branch vs base
+(`git diff --numstat`), split by intent:
+
+| Bucket | + | − | net |
+|---|---:|---:|---:|
+| **Orchestration** — `tasks.py`(131) + `.mcp.json`(9) + hooks(30) + pin(1) + CI + vscode, **minus** deleted scripts | 186 | 364 | **−178** |
+| Agent-gate scaffolding (`camas mcp init --claude` generated; optional) | 129 | 0 | +129 |
+| Docs (this file; one-off narrative) | 410 | 0 | +410 |
+
+Deleted (364): `script/lint_and_test.py` (250), `script/lint` (28), `script/check_format`
+(10), plus 72 lines of CI YAML and the hardcoded vscode commands. Replaced by 186 lines
+centered on one **typed** `tasks.py` (131). CI **21 → 19 jobs** (three validate jobs →
+one `camas validate`); mypy/pylint/pylint-tests full-runs now source their command from
+`tasks.py`. So: fewer moving parts, one authoritative definition, and every lint/type
+invocation has a single home. The `tasks.py` line is not "free" — but it is the *only*
+copy, versus the 3–4 it replaces, and it is type-checked (`camas_check`) where the YAML/shell
+it replaced was not. Further collapse is possible (fold mypy/pylint into `camas ci_checks`),
+held back only by the partial-lint boundary below.
+
+**Honest boundary kept in CI:** the mypy/pylint jobs' *partial* runs (lint only the changed
+integration **directories**, `test_full_suite == false`) stay as raw globs — camas scopes by
+changed **files** with a suffix filter, which can't express "mypy the whole `components/foo/`
+dir because a file under it changed." So full runs use `camas`; the dir-glob partial
+optimization stays raw. camas also keeps `prek` for ruff/codespell + the external hooks
+(prettier/yamllint/zizmor/hadolint), which don't live in the venv.
+
 ## Current state
 
 - `camas[mcp]==0.1.26` in `requirements_test.txt`.
 - `.venv` = **real, full-deps** — `uv pip install -e . -r requirements_all.txt -r
   requirements_test.txt` (1667 pkgs; `dtlssocket` built via `autoconf`/`automake`/`libtool`;
   `hassil`/`paho.mqtt`/`pyoverkiz`/`pytradfri`/`google.cloud.texttospeech` all import).
-- Single-file `tasks.py` (15 tasks), no `Project`, no `name=`, bound nodes:
-  `fix` (ruff --fix → format, `mutates`) · `lint` = `Parallel(ruff_lint,
-  ruff_format_check, mypy, pylint, codespell)` · `check` = `Parallel(lint, hassfest, test)`
-  · `dev = Sequential(fix, check)` · `gate` = `Parallel(ruff_lint, ruff_format_check)`.
-  `Config(default_task=dev, github_task=check, agent=Claude(fix=fix, check=gate))`.
-  Heavy leaves carry `{paths}`/`when=` scopes mirroring the pre-commit `files:` filters.
-  `test = Sequential(compile_translations, pytest)` and the pytest leaf's `to_tests`
-  scope maps changed source → its test file (subsumes `script/lint_and_test.py`).
+- Single-file `tasks.py` (20 tasks), no `Project`, no `name=`, bound nodes:
+  `fix` (ruff --fix → format, `mutates`) · `lint` = `Parallel(ruff_lint, ruff_format_check,
+  mypy, pylint, pylint_tests, codespell)` · `validate` = `Parallel(hassfest, gen_requirements,
+  gen_copilot)` · `ci_checks` = `Parallel(lint, validate)` · `test` =
+  `Sequential(compile_translations, pytest)` · `check` = `Parallel(ci_checks, test)` ·
+  `dev` = `Sequential(fix, check)`. `Config(default_task=dev, github_task=check,
+  agent=Claude(fix=fix, check=lint))`. Heavy leaves carry `{paths}`/`when=` scopes mirroring
+  the pre-commit `files:` filters; the pytest leaf's `to_tests` scope maps a changed source
+  file → its test file (subsumes `script/lint_and_test.py`). CI runs `camas validate` (one
+  job) and `camas mypy`/`camas pylint`/`camas pylint_tests` (SSOT for the full runs).
 - **Fidelity fixes to reproduce CI exactly:** `pylint --ignore-missing-annotations=y`
   (CI's flag — without it HA's `hass_enforce_type_hints` plugin flags ~hundreds of
   missing-annotation E7402/E7403 that CI suppresses); `hassfest --requirements
@@ -228,6 +258,12 @@ leaf never being timed; this is about a *passing* leaf mis-estimated for the sco
   boundary, and the honest limit of the matrix-SSOT story for HA.
 
 ## Scripting-removal assessment (what camas subsumes)
+
+**Realized this session** (see the net −178 accounting above): `script/lint`,
+`script/lint_and_test.py`, `script/check_format` **deleted**; `.vscode/tasks.json`
+Pytest/Ruff/Pylint/translations repointed at `camas`; ci.yaml's three validate jobs
+consolidated into one `camas validate` and the mypy/pylint full-runs sourced from `camas`.
+The rest below is the remaining map / what deliberately stays.
 
 From the full orchestration map. camas replaces the **glue**, not the tools/scripts:
 
